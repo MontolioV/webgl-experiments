@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, user-scalable=no, initial-scale=1.0, trianglesCountimum-scale=1.0, minimum-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Black hole</title>
+  <style>
+    .controls {
+      position: fixed;
+    }
+  </style>
+</head>
+<body>
+<div class="controls">
+  <table>
+    <tr>
+      <td>
+        <label for="points-amount">Points amount:</label>
+      </td>
+      <td>
+        <input id="points-amount" type="number" min="1" value="1000000">
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <label for="point-size">Point size:</label>
+      </td>
+      <td>
+        <input id="point-size" type="number" min="1" value="1">
+      </td>
+    </tr>
+  </table>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script id="vs-update" type="x-shader/x-vertex">
+  #version 300 es
+  precision mediump float;
+  uniform vec2 u_CursorPosition;
+  uniform bool u_CursorAttracts;
+  in vec2 inValue;
+  out vec2 outValue;
+
+  void main(){
+    vec2 distanceByAxises = u_CursorPosition - inValue;
+    float distanceAbsolute = sqrt(pow(distanceByAxises.x, 2.0) + pow(distanceByAxises.y, 2.0));
+
+    if (distanceAbsolute < 0.8 && distanceAbsolute > 0.01) {
+      float speed = (1.0 / distanceAbsolute) / 100.0;
+      vec2 offset = 0.1 * sign(distanceByAxises) * speed;
+      if (u_CursorAttracts){
+        outValue = inValue + offset;
+      } else {
+        outValue = inValue - offset;
+      }
+    } else if (distanceAbsolute <= 0.01) {
+      if (u_CursorAttracts){
+        outValue = inValue;
+      } else {
+        float randomizedOffset = float(gl_VertexID % 100)*0.0001;
+        if (randomizedOffset < 0.0001){
+          randomizedOffset = 0.001;
+        }
+        vec2 randomizedOffsetByAxises;
+        switch (gl_VertexID % 4){
+          case 0: randomizedOffsetByAxises = vec2(randomizedOffset, randomizedOffset);break;
+          case 1: randomizedOffsetByAxises = vec2(randomizedOffset, -randomizedOffset);break;
+          case 2: randomizedOffsetByAxises = vec2(-randomizedOffset, randomizedOffset);break;
+          case 3: randomizedOffsetByAxises = vec2(-randomizedOffset, -randomizedOffset);break;
+        }
+        outValue = inValue + randomizedOffsetByAxises;
+      }
+    } else {
+      outValue = inValue;
+    }
+  }
+</script>
+
+<script id="vs-draw" type="x-shader/x-vertex">
+  #version 300 es
+  precision mediump float;
+  uniform float u_PointSize;
+  in vec2 inValue;
+  out vec2 color;
+
+  void main(){
+    color=inValue;
+    gl_PointSize = u_PointSize;
+    gl_Position = vec4(inValue, 0.0, 1.0);
+  }
+</script>
+
+<script id="fs-update" type="x-shader/x-fragment">
+  #version 300 es
+  precision mediump float;
+
+  out vec4 o_FragColor;
+
+  void main() {
+    o_FragColor = vec4(0.0, 0.0, 0.0, 0.9);
+  }
+</script>
+
+
+<script id="fs-draw" type="x-shader/x-fragment">
+  #version 300 es
+  precision mediump float;
+
+  in vec2 color;
+  out vec4 o_FragColor;
+
+  void main() {
+    o_FragColor = vec4(color, 0.0, 0.9);
+  }
+</script>
+
+<script>
+  'use strict';
+  (() => {
+    /* Global variables declaration */
+    const CANVAS = document.getElementById('canvas');
+    const CANVAS_WIDTH = window.innerWidth
+    const CANVAS_HEIGHT = window.innerHeight
+    let cursorX = 0, cursorY = 0;
+    let cursorAttracts = true
+    let vertexesAmount
+    let pointSize = 1
+    let readBufferIdx = 0
+    let writeBufferIdx = 1
+    let programUpdate, programDraw;
+    let gl = CANVAS.getContext('webgl2')
+    let vaos = [
+      gl.createVertexArray(),
+      gl.createVertexArray(),
+      gl.createVertexArray(),
+      gl.createVertexArray(),
+    ]
+    let buffers = [
+      gl.createBuffer(),
+      gl.createBuffer(),
+    ]
+    let randomPoints = [];
+
+
+    /* Prepare and start rendering */
+    init();
+    render();
+
+    function init() {
+      CANVAS.width = CANVAS_WIDTH
+      CANVAS.height = CANVAS_HEIGHT
+
+      initPointsAmountFromURL()
+      addMouseEventListeners()
+
+      /* Create and compile Shader programs */
+      programUpdate = makeProgram(getShaderSource('vs-update'), getShaderSource('fs-update'), ['outValue']);
+      programDraw = makeProgram(getShaderSource('vs-draw'), getShaderSource('fs-draw'));
+
+      /* Prepare random data for initial vertex data and random seed */
+      for (let i = 0; i < vertexesAmount; i++) {
+        randomPoints.push(-1 + 2 * Math.random());
+        randomPoints.push(-1 + 2 * Math.random());
+      }
+
+      /* Bind buffers to programs */
+      for (let i = 0; i < 4; i++) {
+        gl.bindVertexArray(vaos[i]);
+        if (i % 2) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffers[1]);
+        } else {
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffers[0]);
+        }
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(randomPoints), gl.STATIC_DRAW);
+
+        gl.useProgram(programUpdate);
+        let attribLocation = gl.getAttribLocation(programUpdate, "inValue");
+        gl.vertexAttribPointer(attribLocation, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(attribLocation);
+
+        gl.useProgram(programDraw);
+        attribLocation = gl.getAttribLocation(programDraw, "inValue");
+        gl.vertexAttribPointer(attribLocation, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(attribLocation);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.bindVertexArray(null);
+      }
+
+      /* Static webgl context drawing settings */
+      gl.enable(gl.DEPTH_TEST);
+      gl.viewport(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
+    function initPointsAmountFromURL() {
+      let queryParams = new URLSearchParams(('' + document.location).split('?')[1])
+      vertexesAmount = queryParams.get('points_amount')
+      if (!vertexesAmount) {
+        vertexesAmount = 1000000
+      }
+      document.getElementById('points-amount').value = vertexesAmount;
+    }
+
+    function addMouseEventListeners() {
+      const CANVAS_OFFSET_X = CANVAS.offsetLeft
+      const CANVAS_OFFSET_Y = CANVAS.offsetTop
+      CANVAS.addEventListener('mousemove', (event) => {
+        cursorX = -1 + (2 * (event.clientX - CANVAS_OFFSET_X) / CANVAS_WIDTH);
+        cursorY = 1 + (-2 * (event.clientY - CANVAS_OFFSET_Y) / CANVAS_HEIGHT);
+      })
+      CANVAS.addEventListener('click', () => {
+        cursorAttracts = !cursorAttracts
+      })
+
+      document.getElementById('points-amount').addEventListener('input', (event) => {
+        let newVertexesAmount = getNormalizedNumValueFromEvent(event)
+        let newLocation = new URL(document.location)
+        newLocation.search = `?points_amount=${newVertexesAmount}`
+        document.location = newLocation.toString()
+      });
+
+      document.getElementById('point-size').addEventListener('input', (event) => {
+        pointSize = getNormalizedNumValueFromEvent(event)
+      });
+    }
+
+    function getNormalizedNumValueFromEvent(event) {
+      let newValue = event.target.valueAsNumber;
+      return newValue && newValue > 0 ? newValue : 1;
+    }
+
+    function getShaderSource(id) {
+      return document.getElementById(id).innerHTML.trim()
+    }
+
+    function makeProgram(vShaderCode, fShaderCode, transformFeedbackVaryings) {
+      let vertShader = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vertShader, vShaderCode);
+      gl.compileShader(vertShader);
+
+      let fragShader = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fragShader, fShaderCode);
+      gl.compileShader(fragShader);
+
+      let shaderProgram = gl.createProgram();
+      gl.attachShader(shaderProgram, vertShader);
+      gl.attachShader(shaderProgram, fragShader);
+
+      /* Setting shader as a proxy for piping data with TRANSFORM_FEEDBACK*/
+      if (transformFeedbackVaryings) {
+        let transformFeedback = gl.createTransformFeedback();
+        gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, transformFeedback);
+        gl.transformFeedbackVaryings(shaderProgram, transformFeedbackVaryings, gl.INTERLEAVED_ATTRIBS);
+      }
+
+      /* Debugging */
+      if (!gl.getShaderParameter(vertShader, gl.COMPILE_STATUS)) {
+        throw gl.getShaderInfoLog(vertShader)
+      }
+      if (!gl.getShaderParameter(fragShader, gl.COMPILE_STATUS)) {
+        throw gl.getShaderInfoLog(fragShader)
+      }
+
+      gl.linkProgram(shaderProgram);
+
+      /* Debugging */
+      if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        throw gl.getProgramInfoLog(shaderProgram);
+      }
+
+      return shaderProgram;
+    }
+
+    function render() {
+      gl.clearColor(0.5, 0.5, 0.5, 0.6);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      updateAndWrite();
+      readAndDraw();
+
+      /* Swap read and write buffers */
+      let tmp = readBufferIdx;
+      readBufferIdx = writeBufferIdx
+      writeBufferIdx = tmp
+
+      window.requestAnimationFrame(render);
+    }
+
+    function updateAndWrite() {
+      gl.bindVertexArray(vaos[readBufferIdx]);
+      gl.useProgram(programUpdate);
+
+      gl.uniform2f(
+        gl.getUniformLocation(programUpdate, "u_CursorPosition"),
+        cursorX, cursorY
+      );
+      gl.uniform1i(
+        gl.getUniformLocation(programUpdate, "u_CursorAttracts"),
+        cursorAttracts
+      );
+
+      /* Using TRANSFORM_FEEDBACK to use read buffer for input and write buffer for output */
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, buffers[writeBufferIdx]);
+      gl.enable(gl.RASTERIZER_DISCARD);
+      gl.beginTransformFeedback(gl.POINTS);
+      gl.drawArrays(gl.POINTS, 0, vertexesAmount);
+      gl.endTransformFeedback();
+      gl.disable(gl.RASTERIZER_DISCARD);
+      gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+      gl.bindVertexArray(null);
+    }
+
+    function readAndDraw() {
+      gl.bindVertexArray(vaos[readBufferIdx + 2]);
+      gl.useProgram(programDraw);
+      gl.uniform1f(
+        gl.getUniformLocation(programDraw, "u_PointSize"),
+        pointSize
+      );
+      gl.drawArrays(gl.POINTS, 0, vertexesAmount);
+      gl.bindVertexArray(null);
+    }
+  })();
+</script>
+</body>
+</html>
